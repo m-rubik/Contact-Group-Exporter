@@ -9,7 +9,7 @@ import pandas as pd
 import regex as re
 from csv import DictWriter
 import xlsxwriter
-from os import remove
+import os
 
 name_regex = re.compile(r"(.*?)\s([A-z]{1}[A-z']+)$")
 garbage_detection_regex = re.compile(r"[a-f0-9]{4}-[a-f0-9]{4}")
@@ -52,6 +52,7 @@ class userInterface:
         """
 
         try:
+            self.cleanup()
             self.file_name = filedialog.askopenfilename(filetypes = (("HTML files","*.html"),))
             if ".html" in self.file_name:
                 self.tables = pd.read_html(self.file_name)
@@ -77,26 +78,65 @@ class userInterface:
         """
 
         print("Analysing HTML page to find all contact entries.")
-        contact_table = self.tables[3]
-        print("Initializing empty contact list")
-        contact_info = dict()
 
-        for row in contact_table.iterrows():
-            data = row[1][2]
-            str_data = str(data)
-            if str_data != "nan":
-                if str_data not in self.skewed_contact_list:
-                    self.skewed_contact_list.append(str_data)
-        if self.skewed_contact_list:
-            messagebox.showwarning("Warning", "Contact information for the following people was not exported properly by Telus:\n\n"+"\n".join(self.skewed_contact_list)+"\n\nThe program will continue to run, but make sure you manually add the entries into the final excel workbook for these people.")
+        try:
+            contact_table = self.tables[3]
+            print("Initializing empty contact list")
+            contact_info = dict()
 
-        for row in contact_table.iterrows():
-            data = row[1][1]
-            str_data = str(data)
-            if str_data != "nan":
-                if str_data != "\"zoom yoga 2020\"":
-                    if str_data[0].isupper():
-                        if str_data == "SSUC":
+            for row in contact_table.iterrows():
+                data = row[1][2]
+                str_data = str(data)
+                if str_data != "nan":
+                    if str_data not in self.skewed_contact_list:
+                        self.skewed_contact_list.append(str_data)
+            if self.skewed_contact_list:
+                messagebox.showwarning("Warning", "Contact information for the following people was not exported properly by Telus:\n\n"+"\n".join(self.skewed_contact_list)+"\n\nThe program will continue to run, but make sure you manually add the entries into the final excel workbook for these people.")
+
+            for row in contact_table.iterrows():
+                data = row[1][1]
+                str_data = str(data)
+                if str_data != "nan":
+                    if str_data != "\"zoom yoga 2020\"":
+                        if str_data[0].isupper():
+                            if str_data == "SSUC":
+                                if "Notes" not in contact_info.keys():
+                                    garbage_match = re.search(garbage_detection_regex, str_data)
+                                    if garbage_match is None:
+                                        contact_info["Notes"] = str_data
+                                else:
+                                    garbage_match = re.search(garbage_detection_regex, str_data)
+                                    if garbage_match is None:
+                                        contact_info["Notes"] = contact_info["Notes"] + ", " + str_data
+                                continue
+                            if contact_info:
+                                self.contact_list.append(contact_info)
+                                print("Adding contact:", contact_info)
+                                contact_info = dict()
+                                match = re.search(name_regex, str_data)
+                                if match is not None:
+                                    first_name = match.group(1)
+                                    last_name = match.group(2)
+                                    print(first_name, last_name)
+                                    contact_info["Name"] = last_name+", "+first_name
+                                    contact_info["Last Name"] = last_name
+                                else:
+                                    raise("Failed to find a name in: "+str_data)
+                            else:
+                                match = re.search(name_regex, str_data)
+                                if match is not None:
+                                    first_name = match.group(1)
+                                    last_name = match.group(2)
+                                    print(first_name, last_name)
+                                    contact_info["Name"] = last_name+", "+first_name
+                                    contact_info["Last Name"] = last_name
+                                else:
+                                    raise("Failed to find a name in: "+str_data)
+                        elif "@" in str_data:
+                            contact_info["email"] = str_data
+                        elif str_data.count('-') >= 2 and ":" not in str_data:
+                            contact_info["phone"] = str_data
+                        else:
                             if "Notes" not in contact_info.keys():
                                 garbage_match = re.search(garbage_detection_regex, str_data)
                                 if garbage_match is None:
@@ -105,46 +145,17 @@ class userInterface:
                                 garbage_match = re.search(garbage_detection_regex, str_data)
                                 if garbage_match is None:
                                     contact_info["Notes"] = contact_info["Notes"] + ", " + str_data
-                            continue
-                        if contact_info:
-                            self.contact_list.append(contact_info)
-                            print("Adding contact:", contact_info)
-                            contact_info = dict()
-                            match = re.search(name_regex, str_data)
-                            first_name = match.group(1)
-                            last_name = match.group(2)
-                            print(first_name, last_name)
-                            contact_info["Name"] = last_name+", "+first_name
-                            contact_info["Last Name"] = last_name
-                        else:
-                            match = re.search(name_regex, str_data)
-                            first_name = match.group(1)
-                            last_name = match.group(2)
-                            print(first_name, last_name)
-                            contact_info["Name"] = last_name+", "+first_name
-                            contact_info["Last Name"] = last_name
-                    elif "@" in str_data:
-                        contact_info["email"] = str_data
-                    elif str_data.count('-') >= 2 and ":" not in str_data:
-                        contact_info["phone"] = str_data
-                    else:
-                        if "Notes" not in contact_info.keys():
-                            garbage_match = re.search(garbage_detection_regex, str_data)
-                            if garbage_match is None:
-                                contact_info["Notes"] = str_data
-                        else:
-                            garbage_match = re.search(garbage_detection_regex, str_data)
-                            if garbage_match is None:
-                                contact_info["Notes"] = contact_info["Notes"] + ", " + str_data
 
-        self.contact_list.append(contact_info)
-        print("Adding contact:", contact_info)
-        print("Finished analysing the HTML. Found", len(self.contact_list), "contacts. Please confirm this with your online list")
+            self.contact_list.append(contact_info)
+            print("Adding contact:", contact_info)
+            print("Finished analysing the HTML. Found", len(self.contact_list), "contacts. Please confirm this with your online list")
 
-        # Ensure there are no Null entries for "Notes"
-        for contact in self.contact_list:
-            if "Notes" not in contact:
-                contact["Notes"] = ""
+            # Ensure there are no Null entries for "Notes"
+            for contact in self.contact_list:
+                if "Notes" not in contact:
+                    contact["Notes"] = ""
+        except Exception as e:
+            self.show_exception(e)
 
     def export_to_CSV(self):
         """!
@@ -172,6 +183,10 @@ class userInterface:
         3. Removed column for last name and phone number
         """
         try:
+            # Delete the xlsx file if it already exists
+            if os.path.exists(self.file_name+".xlsx"):
+                os.remove(self.file_name+".xlsx")
+
             read_file = pd.read_csv (self.file_name+".csv")
             read_file.sort_values('Last Name', inplace=True) # Sort by last name
             read_file.drop(columns=['Last Name'], inplace=True) # Remove last name column
@@ -190,11 +205,17 @@ class userInterface:
             writer.save()
 
             # Cleanup by deleting the csv that is not needed
-            remove(self.file_name+".csv")
+            os.remove(self.file_name+".csv")
             
             return 0
-        except Exception:
-            return 1
+        except Exception as e:
+            self.show_exception(e)
+
+    def cleanup(self):
+        self.contact_list = list()
+        self.file_name = ""
+        self.tables = None
+        self.skewed_contact_list = list()
 
     def open_help_window(self):
         """!
@@ -215,6 +236,10 @@ class userInterface:
         message_str += "9. Verify that the contacts within the workbook are correct, and add any that were flagged as incomplete. If you did not see any message pop-up during the run about improperly exported contacts, you can skip this.\n"
         w = Message(self.help_window, text=message_str)
         w.pack()
+
+    def show_exception(self, e):
+        messagebox.showerror("Exception", e)
+        return 1
 
 class HoverButton(tk.Button):
     """!
